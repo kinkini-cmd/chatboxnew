@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Flask Chat</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container chat-container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <h2 class="sidebar-header">Rooms</h2>
+        <ul class="room-list">
+            {% for room in rooms %}
+                <li class="room-item" onclick="joinRoom('{{ room }}')">{{ room }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <!-- Chat Section -->
+    <div class="chat">
+        <div class="chat-header">
+            <h2>Welcome, <span id="username">{{ username }}</span></h2>
+        </div>
+
+        <div id="chat" class="messages"></div>
+
+        <div class="chat-input">
+            <input id="message" placeholder="Type a message..." onkeypress="handleKeyPress(event)" />
+            <button onclick="sendMessage()">➤</button>
+        </div>
+    </div>
+
+    <!-- Active Users -->
+    <div class="profile">
+        <h3>Active Users</h3>
+        <div id="active-users"></div>
+    </div>
+</div>
+
+<script>
+    let socket = io();
+    let currentRoom = "General";
+    let username = document.getElementById('username').textContent;
+    let roomMessages = {};
+
+    socket.on('connect', () => { joinRoom('General'); });
+
+    socket.on('message', data => addMessage(data.username, data.msg, data.username === username ? 'own' : 'other'));
+    socket.on('private_message', data => addMessage(data.from, `[Private] ${data.msg}`, 'private'));
+    socket.on('status', data => addMessage('System', data.msg, 'status'));
+
+    socket.on('active_users', data => {
+        const userList = document.getElementById('active-users');
+        userList.innerHTML = data.users.map(user =>
+            `<div class="user-item" onclick="insertPrivateMessage('${user}')">${user}${user === username ? ' (you)' : ''}</div>`
+        ).join('');
+    });
+
+    function addMessage(sender, message, type) {
+        if (!roomMessages[currentRoom]) roomMessages[currentRoom] = [];
+        roomMessages[currentRoom].push({ sender, message, type });
+
+        const chat = document.getElementById('chat');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${type}`;
+        messageDiv.innerHTML = `<strong>${sender}:</strong> ${message}`;
+        chat.appendChild(messageDiv);
+        chat.scrollTop = chat.scrollHeight;
+    }
+
+    function sendMessage() {
+        const input = document.getElementById('message');
+        const message = input.value.trim();
+        if (!message) return;
+
+        if (message.startsWith('@')) {
+            const [target, ...msgParts] = message.split(' ');
+            const privateMsg = msgParts.join(' ');
+            if (privateMsg) socket.emit('message', { msg: privateMsg, type: 'private', target: target.replace('@', '') });
+        } else {
+            socket.emit('message', { msg: message, room: currentRoom });
+        }
+
+        input.value = '';
+        input.focus();
+    }
+
+    function joinRoom(room) {
+        socket.emit('leave', { room: currentRoom });
+        currentRoom = room;
+        socket.emit('join', { room });
+
+        const chat = document.getElementById('chat');
+        chat.innerHTML = "";
+        if (roomMessages[room]) roomMessages[room].forEach(msg => addMessage(msg.sender, msg.message, msg.type));
+
+        document.querySelectorAll('.room-item').forEach(item => item.classList.remove('active-room'));
+        document.querySelectorAll('.room-item').forEach(item => {
+            if(item.textContent.trim() === room) item.classList.add('active-room');
+        });
+    }
+
+    function insertPrivateMessage(user) {
+        document.getElementById('message').value = `@${user} `;
+        document.getElementById('message').focus();
+    }
+
+    function handleKeyPress(event) {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendMessage();
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.room-item').forEach(item => {
+            if (item.textContent.trim() === currentRoom) item.classList.add('active-room');
+        });
+    });
+</script>
+</body>
+</html>
